@@ -22,7 +22,7 @@ class Actor(nn.Module):
             seed (int): Random seed
             fc1_units (int): Number of nodes in first hidden layer
             fc2_units (int): Number of nodes in second hidden layer
-            bn_mode (int): Use Batch Normalization - 0=disabled, 1=BN before Activation, 2=BN after Activation (3, 4 are alt. versions of 1, 2)
+            bn_mode (int): Use Batch Normalization; 0=Off, 1&&3=BN before Activation, 2&&4=BN after Activation 
         """
         super(Actor, self).__init__()
         self.seed = torch.manual_seed(seed)
@@ -41,10 +41,6 @@ class Actor(nn.Module):
         self.bn_mode=bn_mode
         
         self.reset_parameters()
-        
-        #print("[INFO] Actor initialized with parameters : state_size={} action_size={} seed={} fc1_units={} fc2_units={} bn_mode={}".format(state_size, action_size, seed, fc1_units, fc2_units, bn_mode))
-        
-        
 
     def reset_parameters(self):
         self.fc1.weight.data.uniform_(*hidden_init(self.fc1))
@@ -111,7 +107,7 @@ class Critic(nn.Module):
             seed (int): Random seed
             fcs1_units (int): Number of nodes in the first hidden layer
             fc2_units (int): Number of nodes in the second hidden layer
-            bn_mode (int): Use Batch Norm. - 0=disabled, 1=BN before Activation, 2=BN after Activation (3, 4 are alt. versions of 1, 2)
+            bn_mode (int): Use Batch Norm; 0=Off, 1&&3=BN before Activation, 2&&4=BN after Activation
         """
         super(Critic, self).__init__()
         self.seed = torch.manual_seed(seed)
@@ -129,9 +125,6 @@ class Critic(nn.Module):
 
         self.reset_parameters()
         
-        #print("[INFO] CRITIC initialized with parameters : state_size={} action_size={} seed={} fcs1_units={} fc2_units={} bn_mode={}".format(state_size, action_size, seed, fcs1_units, fc2_units, bn_mode))
-        
-
     def reset_parameters(self):
         self.fcs1.weight.data.uniform_(*hidden_init(self.fcs1))
         self.fc2.weight.data.uniform_(*hidden_init(self.fc2))

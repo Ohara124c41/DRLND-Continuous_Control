@@ -13,38 +13,41 @@ import torch.optim as optim
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+
 class Agent():
     def __init__(self, state_size, action_size, random_seed=10,
-                actor_fc1_units=400, actor_fc2_units=300,
-                critic_fcs1_units=400, critic_fc2_units=300,
+                actor_fc1_units=128, actor_fc2_units=128,
+                critic_fcs1_units=128, critic_fc2_units=128,
                 buffer_size=int(1e5), batch_size=128,
-                gamma=0.99, tau=1e-3 , bn_mode=0,
+                gamma=0.995, tau=1e-3 , bn_mode=0,
                 lr_actor=1e-4, lr_critic=1e-4, weight_decay=0,
-                add_ounoise=True, mu=0., theta=0.15, sigma=0.2):
+                add_ounoise=True, mu=0., theta=0.15, sigma=0.15):
         
         """Initialize an Agent object.
+        
+        Values based on: https://arxiv.org/pdf/1709.06560.pdf
         
         Params
         ======
             state_size (int): dimension of each state
             action_size (int): dimension of each action
             random_seed (int): random seed
-            actor_fc1_units (int): number of units for the layer 1 in the actor model
-            actor_fc2_units (int): number of units for the layer 2 in the actor model
-            critic_fcs1_units (int): number of units for the layer 1 in the critic model
-            critic_fc2_units (int): number of units for the layer 2 in the critic model
+            actor_fc1_units (int): number of units for L1 in the actor model
+            actor_fc2_units (int): number of units for L2 in the actor model
+            critic_fcs1_units (int): number of units for L1 in the critic model
+            critic_fc2_units (int): number of units for L2 in the critic model
             buffer_size (int) : replay buffer size
             batch_size (int) : minibatch size
             gamma (int) : discount factor
             tau (int) : for soft update of target parameter
-            bn_mode (int): Use Batch Norm - 0=disabled, 1=BN before Activation, 2=BN after Activation (3, 4 are alt. versions of 1, 2)
+            bn_mode (int): Use Batch Norm; 0=Off, 1&&3=BN before Activation, 2&&4=BN after Activation
             lr_actor (int) : learning rate of the actor 
             lr_critic (int) : learning rate of the critic 
             weight_decay (int) : L2 weight decay  
-            add_ounoise (bool) : Add Ornstein-Uhlenbeck noise
-            mu (float) : Ornstein-Uhlenbeck noise parameter
-            theta (float) : Ornstein-Uhlenbeck noise parameter
-            sigma (float) : Ornstein-Uhlenbeck noise parameter            
+            add_ounoise (bool) : Toggle Ornstein-Uhlenbeck noisy relaxation process
+            mu (float) : x_0 -> spring length at rest [Ornstein-Uhlenbeck]
+            theta (float) : k/gamma -> spring constant/friction coefficient [Ornstein-Uhlenbeck]
+            sigma (float) : root(2k_B*T/gamma) -> Stokes-Einstein for effective diffision [Ornstein-Uhlenbeck]          
         """
         
         print("\n[INFO]ddpg constructor called with parameters: state_size={} action_size={} random_seed={} actor_fc1_units={} actor_fc2_units={} critic_fcs1_units={} critic_fc2_units={} buffer_size={} batch_size={} gamma={} tau={} bn_mode={} lr_actor={} lr_critic={} weight_decay={} add_ounoise={} mu={} theta={} sigma={} \n".format(state_size, action_size, random_seed, 
@@ -92,10 +95,11 @@ class Agent():
     
     def step(self, state, action, reward, next_state, done):
         """Save experience in replay memory, and use random sample from buffer to learn."""
-        # Save experience / reward
+        
+        # Store
         self.memory.add(state, action, reward, next_state, done)
 
-        # Learn, if enough samples are available in memory
+        # Pull memory samples to derive experience
         if len(self.memory) > self.batch_size:
             experiences = self.memory.sample()
             self.learn(experiences, self.gamma)
@@ -127,31 +131,38 @@ class Agent():
         """
         states, actions, rewards, next_states, dones = experiences
 
-        # ---------------------------- update critic ---------------------------- #
+        # ---------------------------- Update critic ---------------------------- #
+
         # Get predicted next-state actions and Q values from target models
         actions_next = self.actor_target(next_states)
         Q_targets_next = self.critic_target(next_states, actions_next)
+
         # Compute Q targets for current states (y_i)
         Q_targets = rewards + (gamma * Q_targets_next * (1 - dones))
+
         # Compute critic loss
         Q_expected = self.critic_local(states, actions)
         critic_loss = F.mse_loss(Q_expected, Q_targets)
+
         # Minimize the loss (using gradient clipping)
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         torch.nn.utils.clip_grad_norm(self.critic_local.parameters(), 1)
         self.critic_optimizer.step()
 
-        # ---------------------------- update actor ---------------------------- #
+        # ---------------------------- Update actor ---------------------------- #
+
         # Compute actor loss
         actions_pred = self.actor_local(states)
         actor_loss = -self.critic_local(states, actions_pred).mean()
+
         # Minimize the loss
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
 
-        # ----------------------- update target networks ----------------------- #
+        # ----------------------- Update target networks ----------------------- #
+
         self.soft_update(self.critic_local, self.critic_target, self.tau)
         self.soft_update(self.actor_local, self.actor_target, self.tau)                     
 
