@@ -12,6 +12,7 @@ For this project, the [Reacher](https://github.com/Unity-Technologies/ml-agents/
 
 ![Trained Agent][image1]
 
+## Environment Details
 
 In this environment, a double-jointed arm can move to target locations. A reward of +0.1 is provided for each step that the agent's hand is in the goal location. Thus, the goal of your agent is to maintain its position at the target location for as many time steps as possible.
 
@@ -19,97 +20,175 @@ The observation space consists of 33 variables corresponding to position, rotati
 
 The task is episodic, and in order to solve the environment,  your agent must get an average score of +30 over 100 consecutive episodes.
 
-
-## Environment Details
-
 This project was completed using the Udacity Workspace with GPU processing for a single agent. [Unity ML-agents](https://github.com/Unity-Technologies/ml-agents) is used at the baseline for creating the environment. There is a second version which contains 20 identical agents, each with its own copy of the environment. The second version is useful for algorithms like [PPO](https://arxiv.org/pdf/1707.06347.pdf), [A3C](https://arxiv.org/pdf/1602.01783.pdf), and [D4PG](https://openreview.net/pdf?id=SyZipzbCb) that use multiple (non-interacting, parallel) copies of the same agent to distribute the task of gathering experience and will be explored at a later time.
 
 
-The state space has 37 dimensions and contains the agent's velocity, along with ray-based perception of objects around the agent's forward direction.
-
-Given this information, the agent has to learn how to best select actions. Four discrete actions are available, corresponding to:
-
-- 0 - move forward.
-- 1 - move backward.
-- 2 - turn left.
-- 3 - turn right.
-
-The task is episodic, and **in order to solve the environment, agent must get an average score of +30 over 100 consecutive episodes.**
+The task is episodic, and **in order to solve the environment, agent must get an average score of +30 over 100 consecutive episodes.** This Report.md describes an off-policy Deep Deterministic Policy Gradient (DDPG) implementation.
 
 
 ## Agent Implementation
 
-### Deep Q-Network
+### Deep Deterministic Policy Gradient (DDPG)
 
-Deep Q-Learning Networks (DQN) combine Deep Neural Network aspects with Reinforcement learning. [Deep Q-Networks](https://deepmind.com/research/dqn/). Q-Learning is implemented in both the Deep Learning and Reinforcement Learning aspects in which the network (agent) attempts to find the optimal policy. This implementation takes the based DQN and adds two additional flavors, namely *Experience Replay* and *Fixed-Q Targets*. This implementation assumes the reader already has some familiarity with DQNs.
+[Deep Deterministic Policy Gradient](https://arxiv.org/abs/1509.02971) builds upon Deep Q-Learning Networks by simultaneoulsy learning a policy and a Q-function via the Bellman equation. The content below is referenced from [OpenAI](https://spinningup.openai.com/en/latest/algorithms/ddpg.html).
+
+This approach is closely connected to Q-learning, and is motivated the same way: if you know the optimal action-value function :math:`Q^*(s,a)`, then in any given state, the optimal action :math:`a^*(s)` can be found by solving
+
+.. math::
+
+    a^*(s) = \arg \max_a Q^*(s,a).
+
+DDPG interleaves learning an approximator to :math:`Q^*(s,a)` with learning an approximator to :math:`a^*(s)`, and it does so in a way which is specifically adapted for environments with continuous action spaces by relating to how  the max over actions in :math:`\max_a Q^*(s,a)` are computed.
+
+As the action space is continuous, the function :math:`Q^*(s,a)` is presumed to be differentiable with respect to the action argument. This allows for an efficient, gradient-based learning rule for a policy :math:`\mu(s)` which exploits that fact. Afterward, and approximation with :math:`\max_a Q(s,a) \approx Q(s,\mu(s))` can be derived.
+
+#### Replay Buffers.
+
+All standard algorithms for training a deep neural network to approximate :math:`Q^*(s,a)` make use of an experience replay buffer. This is the set :math:`{\mathcal D}` of previous experiences. In order for the algorithm to have stable behavior, the replay buffer should be large enough to contain a wide range of experiences, but it may not always be good to keep everything. If you only use the very-most recent data, you will overfit to that and things will break; if you use too much experience, you may slow down your learning. This may take some tuning to get right.
+
+#### Target Networks
+
+Q-learning algorithms make use of **target networks**. The term
+
+.. math::
+
+    r + \gamma (1 - d) \max_{a'} Q_{\phi}(s',a')
+
+is called the **target**, because when we minimize the MSBE loss, we are trying to make the Q-function be more like this target. Problematically, the target depends on the same parameters we are trying to train: :math:`\phi`. This makes MSBE minimization unstable. The solution is to use a set of parameters which comes close to :math:`\phi`, but with a time delay---that is to say, a second network, called the target network, which lags the first. The parameters of the target network are denoted :math:`\phi_{\text{targ}}`.
+
+In DQN-based algorithms, the target network is just copied over from the main network every some-fixed-number of steps. In DDPG-style algorithms, the target network is updated once per main network update by polyak averaging:
+
+.. math::
+
+    \phi_{\text{targ}} \leftarrow \rho \phi_{\text{targ}} + (1 - \rho) \phi,
+
+where :math:`\rho` is a hyperparameter between 0 and 1 (usually close to 1). (This hyperparameter is called ``polyak`` in our code).
+
+#### DDPG Specific
+
+Computing the maximum over actions in the target is a challenge in continuous action spaces. DDPG deals with this by using a **target policy network** to compute an action which approximately maximizes :math:`Q_{\phi_{\text{targ}}}`. The target policy network is found the same way as the target Q-function: by polyak averaging the policy parameters over the course of training.
+
+Putting it all together, Q-learning in DDPG is performed by minimizing the following MSBE loss with stochastic gradient descent:
+
+.. math::
+
+    L(\phi, {\mathcal D}) = \underset{(s,a,r,s',d) \sim {\mathcal D}}{{\mathrm E}}\left[
+        \Bigg( Q_{\phi}(s,a) - \left(r + \gamma (1 - d) Q_{\phi_{\text{targ}}}(s', \mu_{\theta_{\text{targ}}}(s')) \right) \Bigg)^2
+        \right],
+
+where :math:`\mu_{\theta_{\text{targ}}}` is the target policy.
+
+
+#### The Policy Learning Side of DDPG
+
+Policy learning in DDPG is fairly simple. We want to learn a deterministic policy :math:`\mu_{\theta}(s)` which gives the action that maximizes :math:`Q_{\phi}(s,a)`. Because the action space is continuous, and we assume the Q-function is differentiable with respect to action, we can just perform gradient ascent (with respect to policy parameters only) to solve
+
+.. math::
+
+    \max_{\theta} \underset{s \sim {\mathcal D}}{{\mathrm E}}\left[ Q_{\phi}(s, \mu_{\theta}(s)) \right].
+
+Note that the Q-function parameters are treated as constants here.
+
+Below, the pseudocode is described:
+
+#### Pseudocode
+----------
+
+.. math::
+    :nowrap:
+
+    \begin{algorithm}[H]
+        \caption{Deep Deterministic Policy Gradient}
+        \label{alg1}
+    \begin{algorithmic}[1]
+        \STATE Input: initial policy parameters $\theta$, Q-function parameters $\phi$, empty replay buffer $\mathcal{D}$
+        \STATE Set target parameters equal to main parameters $\theta_{\text{targ}} \leftarrow \theta$, $\phi_{\text{targ}} \leftarrow \phi$
+        \REPEAT
+            \STATE Observe state $s$ and select action $a = \text{clip}(\mu_{\theta}(s) + \epsilon, a_{Low}, a_{High})$, where $\epsilon \sim \mathcal{N}$
+            \STATE Execute $a$ in the environment
+            \STATE Observe next state $s'$, reward $r$, and done signal $d$ to indicate whether $s'$ is terminal
+            \STATE Store $(s,a,r,s',d)$ in replay buffer $\mathcal{D}$
+            \STATE If $s'$ is terminal, reset environment state.
+            \IF{it's time to update}
+                \FOR{however many updates}
+                    \STATE Randomly sample a batch of transitions, $B = \{ (s,a,r,s',d) \}$ from $\mathcal{D}$
+                    \STATE Compute targets
+                    \begin{equation*}
+                        y(r,s',d) = r + \gamma (1-d) Q_{\phi_{\text{targ}}}(s', \mu_{\theta_{\text{targ}}}(s'))
+                    \end{equation*}
+                    \STATE Update Q-function by one step of gradient descent using
+                    \begin{equation*}
+                        \nabla_{\phi} \frac{1}{|B|}\sum_{(s,a,r,s',d) \in B} \left( Q_{\phi}(s,a) - y(r,s',d) \right)^2
+                    \end{equation*}
+                    \STATE Update policy by one step of gradient ascent using
+                    \begin{equation*}
+                        \nabla_{\theta} \frac{1}{|B|}\sum_{s \in B}Q_{\phi}(s, \mu_{\theta}(s))
+                    \end{equation*}
+                    \STATE Update target networks with
+                    \begin{align*}
+                        \phi_{\text{targ}} &\leftarrow \rho \phi_{\text{targ}} + (1-\rho) \phi \\
+                        \theta_{\text{targ}} &\leftarrow \rho \theta_{\text{targ}} + (1-\rho) \theta
+                    \end{align*}
+                \ENDFOR
+            \ENDIF
+        \UNTIL{convergence}
+    \end{algorithmic}
+    \end{algorithm}
+
 
 ## Model
-### Input Representation
-
-1. Each image frame in RGB is converted into it's [luminosity's representation](https://stackoverflow.com/questions/596216/formula-to-determine-brightness-of-rgb-color), which has one channel instead of three.
-2. Resulting images are rezised into a square image with size 84 x 84.
-3. The tensor containing a sequence of the last 4 processed frames is used as input for the Deep Convolutional Neural Network. Such tensor has size (4 x 84 x 84).
-
-### Neural Network
-1. The neural network contains a sequence of **three convolutional layers**, each followed by a [Rectifier Linear Unit (ReLU)](https://en.wikipedia.org/wiki/Rectifier_(neural_networks)) layer.
-2. The **output** of the last hidden layer is **flattened into a 1-dimensional** vector, which is used as the first layer of a fully-connected neural network.
-3. The **first layer** of the fully-connected network is connected to a single hidden layer, with an additional ReLU.
-4. The **output layer** has multiple outputs, each one for each possible action that the agent has.
-
-This approach has several advantages over standard online Q-learning. First, each step of experience is potentially used in many weight updates, which allows for greater data efficiency. Second, learning directly from consecutive samples is inefficient, owing to the strong correlations between the samples; randomizing the samples breaks these correla- tions and therefore reduces the variance of the updates. Third, when learning on- policy the current parameters determine the next data sample that the parameters are trained on.
-
-It is important to clarify that the neural network is not trained on the sequentially obtained inputs generated by playing the game, but rather on randomly sampled transitions/experiences from a data structure named **Replay Memory**, which improves learning performance by: not allowing the network to learn from correlations, and also permitting efficient data usage with the reuse of previous experiences.
+The next two entries visualize the flow diagrams for the Network. This work builds upon implementations from the first DRLND project [Navigation](https://github.com/Ohara124c41/DRLND-Navigation/blob/master/Report.md).
 
 
-### Deep Q-Learning with Experience Replay
+#### Actor
+Below, the flow diagram demonstrates how the Actor network is setup.
 
-Pseudocode for the Q-Learning algorithm which uses the previously mentioned model is presented next.
-
-Following conventions are important to understand the pseudo-code:
-
-- __M__: Number of episodes to train the learning agent.
-- __sᵢ__: Environment/game frame at step i.
-- __T__: Maximum number of steps (time limit) that the agent has in the current episode.
-- __𝑄()__: Neural network that learns to approximate the real 'Q value' for every transition.
-- __^𝑄()__: Copy of the previous neural network, which is used to calculate as the 'target values'. It is used to calculate the prediction error, and backpropagate the network. Every *C* steps it is updated as a copy of the network 𝑄.
-- __φ__: Mapping function that takes a sequence of images and transforms it into an input representation (see *input representation* above).
-- __D__: Replay memory. Contains transitions (φᵢ₊₁ ,a,r,φᵢ₊₂) that are randomly sampled to train the network.
-
-**Pseudo-code:**
-
-<img src="pseudocode.png" width="650">
-
-### Fixed-Q Targets
-
-As we saw, the first component of the TD Error (TD stands for Temporal Difference) is the Q-Target and it is calculated as the immediate reward plus the discounted max Q-value for the next state. When we train our agent, we update the weights accordingly to the TD Error.
-
-<img src="TDError.jpg" width="650">
+<img src="actor.png" width="650">
 
 
+#### Critic
+Below, the flow diagram demonstrates how the Critic network is setup.
 
-We move the output closer to the target, but we also move the target. So, we end up chasing the target and we get a highly oscillated training process. Wouldn’t be great to keep the target fixed as we train the network. Well, DeepMind did exactly that. Instead of using one Neural Network, it uses two. One as the main Deep Q Network and a second one (called Target Network) to update exclusively and periodically the weights of the target. This technique is called Fixed Q-Targets. In fact, the weights are fixed for the largest part of the training and they updated only once in a while. The image below demonstrates the general architecture.
+<img src="critic.png" width="650">
 
-<img src="fixedQ.PNG" width="650">
 
 
 ### Code Implementation
 
 
-**NOTE:** Code will run in GPU if CUDA is available, otherwise it will run in CPU :)
+**NOTE:** Code will run in GPU if CUDA is available, otherwise it will run in CPU
 
 Code is structured in different modules. The most relevant features will be explained next:
 
-1. **model.py:** It contains the main execution thread of the program. This file is where the main algorithm is coded (see *algorithm* above). PyTorch is utilized for training the agent in the environment. The agent has two hidden FC layers with a size of 1024. The input and output layer sizes vary based on values passed through the constructor.
-2. **dqn_agent.py:** The model script contains a constructor that is responsible for initializing the *replay_buffer*, and both the *local* and *target networks*. Next, a *step()* function stores the *S,A,R,S',√* values in the *replay_buffer*. An *UPDATE_FREQ* flag allows for the *target weights* to be updated with the *current weights*. An *act()* function then takes the current policy (e.g. Epsilon-Greedy) and returns the actions for the state. Following this, a *learn()* function compares the hyperparameters based on the given *experiences*. Embedded in the *learn()* function, a *soft_update* feature based on the Fixed-Q algorithm takes the *local* weights and updates the *target* values.
-3. **Navigation.ipynb:** The Navigation Jupyter Notebook provides an environment to run the *Banana* game, import dependencies, take *random_actions*, train the DQN, and plot the results. The hyperparameters can be adjusted within the Notebook.
+1. **model.py:** It contains the main execution thread of the program. This file is where the main algorithm is coded (see *algorithm* above). PyTorch is utilized for training the agent in the environment. The agent has an Actor and Critic network.
+2. **ddpg_agent.py:** The model script contains  the **DDPG agent**, a **Replay Buffer memory**, and the **Q-Targets** feature. A `learn()` method uses batches to handle the value parameters and update the policy.
+3. **Continuous_Control.ipynb:** The Navigation Jupyter Notebook provides an environment to run the *Tennis* game, import dependencies, train the DDPG, visualize via Unity, and plot the results. The hyperparameters can be adjusted within the Notebook.
+
+
+#### PyTorch Specifics
+
+
+Documentation: PyTorch Version
+------------------------------
+
+.. autofunction:: spinup.ddpg_pytorch
+
+Saved Model Contents: PyTorch Version
+-------------------------------------
+
+The PyTorch saved model can be loaded with ``ac = torch.load('path/to/model.pt')``, yielding an actor-critic object (``ac``) that has the properties described in the docstring for ``ddpg_pytorch``.
+
+You can get actions from this model with
+
+.. code-block:: python
+
+    actions = ac.act(torch.as_tensor(obs, dtype=torch.float32))
 
 
 
+### DDPG Hyperparameters
 
-
-### DQN Hyperparameters
-
-The DQN agent uses the following parameters values (defined in dqn_agent.py)
+The DQN agent uses the following parameters values (defined in ddpg_agent.py)
 
 ```
 BUFFER_SIZE = int(1e6)  # Replay buffer size
@@ -131,15 +210,9 @@ SIGMA = 0.2             # root(2k_B*T/gamma) -> Stokes-Einstein for effective di
 ENV_STATE_SIZE = states.shape[1]
 ```
 
-#### Actor
-
-#### Critic
-
-
-
 ### Results
 
-With the afformentioned setup, the agent was able to successfully meet the functional specifications in 728 episodes an a total training time of 18.7min (see below):
+With the afformentioned setup, the agent was able to successfully meet the functional specifications in 500 episodes with an average score of 33.31 (see below):
 ```
 Start training:
 Episode 100	Average Score: 2.49	Score: 4.56
@@ -149,30 +222,28 @@ Episode 400	Average Score: 28.71	Score: 20.66
 Environment solved in 500 episodes with an Average Score of 33.31
 ```
 
-The target episodes was 1800, meaning this implementation is **2.472x more performant** than required.
 
 <img src="results.png" width="650">
 
-From the image above, we can see that the agent is quite confused even though the state space is relatively small for the next immediate action. Therefore, additional models should be explored and are suggested in the Future Work section below.
 
 ### Future Work
 
-This section contains two additional algorithms that would vastly improve over the current implementation, namely A3C and DDPG. Such algorithms have been developed by DeepMind and implemented in DRL-agents including robots from Boston Dynamics.
+This section contains two additional algorithms that would vastly improve over the current implementation, namely TRPO and TD3. Such algorithms have been developed to improve over DQNs and DDPGs.
 
-- [Asynchronous Advantage Actor-Critic (A3C)](https://arxiv.org/pdf/1602.01783.pdf):
-A3C consists of multiple independent agents(networks) with their own weights, who interact with a different copy of the environment in parallel. Thus, they can explore a bigger part of the state-action space in much less time. The agents (or workers) are trained in parallel and update periodically a global network, which holds shared parameters. The updates are asynchronous (e.g. not simultaneous) and are used reset agent parameters to match the global network and continue their independent exploration and training for n-steps until they update themselves again.
+- [Trust Region Policy Optimization (TRPO)](https://arxiv.org/abs/1502.05477):
+> We describe an iterative procedure for optimizing policies, with guaranteed monotonic improvement. By making several approximations to the theoretically-justified procedure, we develop a practical algorithm, called Trust Region Policy Optimization (TRPO). This algorithm is similar to natural policy gradient methods and is effective for optimizing large nonlinear policies such as neural networks. Our experiments demonstrate its robust performance on a wide variety of tasks: learning simulated robotic swimming, hopping, and walking gaits; and playing Atari games using images of the screen as input. Despite its approximations that deviate from the theory, TRPO tends to give monotonic improvement, with little tuning of hyperparameters.
 
 
 
-- [Deep Deterministic Policy Gradient (DDPG)](https://spinningup.openai.com/en/latest/algorithms/ddpg.html)
+- [Twin-Delay DDPG (TD3)](https://arxiv.org/pdf/1802.09477.pdf)
 
-> Deep Deterministic Policy Gradient (DDPG) is an algorithm which concurrently learns a Q-function and a policy. It uses off-policy data and the Bellman equation to learn the Q-function, and uses the Q-function to learn the policy.This approach is closely connected to Q-learning, and is motivated the same way: if you know the optimal action-value function Q^\*(s,a), then in any given state, the optimal action a^\*(s) can be found. DDPG interleaves learning an approximator to Q^\*(s,a) with learning an approximator to a^\*(s), and it does so in a way which is specifically adapted for environments with continuous action spaces. When there are a finite number of discrete actions, the max poses no problem, because we can just compute the Q-values for each action separately and directly compare them. Because the action space is continuous, the function Q^*(s,a) is presumed to be differentiable with respect to the action argument. This allows us to set up an efficient, gradient-based learning rule for a policy \mu(s) which exploits that fact. Then, instead of running an expensive optimization subroutine each time we wish to compute \max_a Q(s,a), we can approximate it with \max_a Q(s,a) \approx Q(s,\mu(s)).
+> Twin Delayed Deep Deterministic policy gradient algorithm (TD3), an actor-critic algorithm which considers the interplay between function approximation error in both policy and value updates. We evaluate our algorithm on seven continuous control domains from OpenAI gym (Brockman et al., 2016), where we outperform the state of the art by a wide margin. TD3 greatly improves both the learning speed and performance of DDPG in a number of challenging tasks in the continuous control setting.  Our algorithm exceeds the performance of numerous state of the art algorithms. As our modifications are simple to implement, they can be easily added to any other actor-critic algorithm.
 
 
 
 
 
 ## Additional References
-_[1] Mnih, V. et al. Human-level control through deep reinforcement learning. Nature 518, 529–533 (2015)._
+_[1] [High-Dimensional Continuous Control Using Generalized Advantage Estimation](https://arxiv.org/abs/1506.02438)_
 
-_[2] Mnih, V., Kavukcuoglu, K., Silver, D., Graves, A., Antonoglou, I., Wierstra, D., and Riedmiller, M. (Dec 2013). Playing Atari with deep reinforcement learning. Technical Report arXiv:1312.5602 [cs.LG], Deepmind Technologies._
+_[2] [CONTINUOUS CONTROL WITH DEEP REINFORCEMENT LEARNING](https://arxiv.org/pdf/1509.02971.pdf)._
