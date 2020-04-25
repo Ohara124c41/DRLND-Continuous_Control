@@ -143,13 +143,13 @@ The next two entries visualize the flow diagrams for the Network. This work buil
 #### Actor
 Below, the flow diagram demonstrates how the Actor network is setup.
 
-<img src="actor.png" width="650">
+![image](https://github.com/Ohara124c41/DRL-Continuous_Control/blob/master/actor.PNG?raw=true)
 
 
 #### Critic
 Below, the flow diagram demonstrates how the Critic network is setup.
 
-<img src="critic.png" width="650">
+![image](https://github.com/Ohara124c41/DRL-Continuous_Control/blob/master/critic.PNG?raw=true)
 
 
 
